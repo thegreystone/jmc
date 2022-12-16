@@ -69,7 +69,7 @@ final class DefaultIItemResultSet implements IItemResultSet {
 		calculateData(items);
 	}
 
-	@SuppressWarnings({"unchecked", "rawtypes"})
+	@SuppressWarnings({"unchecked", "rawtypes", "deprecation"})
 	private void calculateData(IItemCollection input) {
 		input = input.apply(query.getFilter());
 		if (query.getGroupBy() == null) {

@@ -119,6 +119,7 @@ public class ItemCollectionToolkit {
 	}
 
 	public static IItemCollection merge(Supplier<Stream<IItemCollection>> items) {
+		@SuppressWarnings("deprecation")
 		Set<IRange<IQuantity>> chunkRanges = items.get().flatMap(i -> i.getUnfilteredTimeRanges().stream())
 				.collect(Collectors.toSet());
 		return ItemCollectionToolkit.build(() -> items.get().flatMap(i -> i.stream()), chunkRanges);
