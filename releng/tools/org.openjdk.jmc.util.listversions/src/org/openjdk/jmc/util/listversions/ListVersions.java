@@ -101,6 +101,10 @@ public class ListVersions {
 						String id = unitElement.getAttribute("id");
 						String version = unitElement.getAttribute("version");
 						switch (id) {
+						case "toolingorg.eclipse.platform.ide.config.gtk.linux.x86_64":
+							// Yes, this is a naughty hack, but it will be the same version id
+							System.out.println("Found unit: org.eclipse.platform.sdk Version: " + version);
+							break;
 						case "org.eclipse.equinox.executable.feature.group":
 						case "org.eclipse.pde.feature.group":
 						case "org.eclipse.platform.sdk":
