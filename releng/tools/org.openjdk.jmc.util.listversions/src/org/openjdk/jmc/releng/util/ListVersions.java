@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2023, 2025, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2023, 2025, Datadog, Inc. All rights reserved.
+ * Copyright (c) 2023, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2026, Datadog, Inc. All rights reserved.
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -31,7 +31,7 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-package org.openjdk.jmc.util.listversions;
+package org.openjdk.jmc.releng.util;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -100,6 +100,9 @@ public class ListVersions {
 			DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
 			dbFactory.setFeature(XML_PARSER_DISALLOW_DOCTYPE_ATTRIBUTE, true);
 			dbFactory.setValidating(true);
+			// Eclipse content.jar entries can exceed the default JAXP entity size limit (100k)
+			dbFactory.setAttribute("jdk.xml.maxGeneralEntitySizeLimit", "0");
+			dbFactory.setAttribute("jdk.xml.totalEntitySizeLimit", "0");
 			DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
 			dBuilder.setErrorHandler(null);
 			Document compositeDoc = dBuilder.parse(compositeZipStream);
@@ -138,7 +141,10 @@ public class ListVersions {
 						Element unitElement = (Element) unitNode;
 						String id = unitElement.getAttribute("id");
 						String version = unitElement.getAttribute("version");
-						versions.put(id, version);
+						String existing = versions.get(id);
+						if (existing == null || compareOsgiVersions(version, existing) > 0) {
+							versions.put(id, version);
+						}
 					}
 				}
 			}
@@ -146,5 +152,29 @@ public class ListVersions {
 			e.printStackTrace();
 		}
 		return versions;
+	}
+
+	// OSGi version order: major.minor.micro numerically, then qualifier as string.
+	static int compareOsgiVersions(String a, String b) {
+		String[] aParts = a.split("\\.", 4);
+		String[] bParts = b.split("\\.", 4);
+		for (int i = 0; i < 3; i++) {
+			int ai = i < aParts.length ? parseIntSafe(aParts[i]) : 0;
+			int bi = i < bParts.length ? parseIntSafe(bParts[i]) : 0;
+			if (ai != bi) {
+				return Integer.compare(ai, bi);
+			}
+		}
+		String aq = aParts.length > 3 ? aParts[3] : "";
+		String bq = bParts.length > 3 ? bParts[3] : "";
+		return aq.compareTo(bq);
+	}
+
+	private static int parseIntSafe(String s) {
+		try {
+			return Integer.parseInt(s);
+		} catch (NumberFormatException e) {
+			return 0;
+		}
 	}
 }
