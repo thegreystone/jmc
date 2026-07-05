@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * 
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -42,6 +42,9 @@ import java.util.logging.Logger;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.openjdk.jmc.agent.collections.CollectionResizeEmitter;
+import org.openjdk.jmc.agent.collections.CollectionTransformDescriptor;
+import org.openjdk.jmc.agent.collections.impl.CollectionResizeClassVisitor;
 import org.openjdk.jmc.agent.jfr.JFRTransformDescriptor;
 import org.openjdk.jmc.agent.jfr.impl.JFRClassVisitor;
 import org.openjdk.jmc.agent.jfrlegacy.impl.JFRLegacyClassVisitor;
@@ -82,8 +85,30 @@ public class Transformer implements ClassFileTransformer {
 	private byte[] doTransform(
 		TransformDescriptor td, byte[] classfileBuffer, ClassLoader definingClassLoader, Class<?> classBeingRedefined,
 		ProtectionDomain protectionDomain) {
+		if (td instanceof CollectionTransformDescriptor) {
+			return doCollectionTracking((CollectionTransformDescriptor) td, classfileBuffer);
+		}
 		return doJFRLogging((JFRTransformDescriptor) td, classfileBuffer, definingClassLoader, classBeingRedefined,
 				protectionDomain);
+	}
+
+	private byte[] doCollectionTracking(CollectionTransformDescriptor td, byte[] classfileBuffer) {
+		if (!CollectionResizeEmitter.isInstalled()) {
+			// No bridge defined (init failed, or not enabled) - weaving the call would throw
+			// NoClassDefFoundError out of the JDK method. Leave the class untouched.
+			return classfileBuffer;
+		}
+		try {
+			ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+			ClassVisitor visitor = new CollectionResizeClassVisitor(classWriter, td);
+			ClassReader reader = new ClassReader(classfileBuffer);
+			reader.accept(visitor, ClassReader.EXPAND_FRAMES);
+			return classWriter.toByteArray();
+		} catch (Throwable t) {
+			Logger.getLogger(getClass().getName()).log(Level.SEVERE,
+					"Failed to instrument collection class " + td.getClassName(), t); //$NON-NLS-1$
+			return classfileBuffer;
+		}
 	}
 
 	private byte[] doJFRLogging(

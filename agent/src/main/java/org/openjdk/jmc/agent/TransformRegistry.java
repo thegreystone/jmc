@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -35,6 +35,8 @@ package org.openjdk.jmc.agent;
 import java.util.List;
 import java.util.Set;
 
+import org.openjdk.jmc.agent.collections.CollectionTrackingSettings;
+
 public interface TransformRegistry {
 	/**
 	 * The named class has transforms that have not been executed yet.
@@ -61,6 +63,19 @@ public interface TransformRegistry {
 	 * @return the unmodifiable set of class names.
 	 */
 	Set<String> getClassNames();
+
+	/**
+	 * Returns the collection resize tracking settings parsed from the configuration.
+	 *
+	 * @return the collection tracking settings; never {@code null} (disabled if not configured).
+	 */
+	CollectionTrackingSettings getCollectionTrackingSettings();
+
+	/**
+	 * Disables collection resize tracking and removes its transforms (e.g. when the bridge failed
+	 * to install). Already-woven classes revert to their original bytecode on the next retransform.
+	 */
+	void disableCollectionTracking();
 
 	/**
 	 * Returns the currently instrumented configuration.
