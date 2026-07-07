@@ -11,7 +11,34 @@
 				</xs:annotation>
 			</xs:element>
 			<xs:element type="eventsType" name="events" minOccurs="0" />
+			<xs:element type="collectionTrackingType"
+				name="collectiontracking" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation>Enables the collection resize tracking
+						capability. When
+						present, JFR events are emitted when the backing
+						array of common collection
+						classes (such as HashMap and ArrayList)
+						is resized.
+					</xs:documentation>
+				</xs:annotation>
+			</xs:element>
 		</xs:all>
+	</xs:complexType>
+
+	<xs:complexType name="collectionTrackingType">
+		<xs:attribute type="xs:nonNegativeInteger" name="minsize"
+			use="optional">
+			<xs:annotation>
+				<xs:documentation>The minimum collection size (entry count) that
+					must be reached
+					before a resize event is emitted. Used to suppress
+					the noise from small
+					collections resizing early in their life.
+					Defaults to 128 if omitted.
+				</xs:documentation>
+			</xs:annotation>
+		</xs:attribute>
 	</xs:complexType>
 
 	<xs:complexType name="configType">
