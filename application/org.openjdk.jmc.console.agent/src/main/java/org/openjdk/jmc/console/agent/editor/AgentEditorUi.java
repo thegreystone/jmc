@@ -1,6 +1,7 @@
 /*
- * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2020, 2025, Red Hat Inc. All rights reserved.
+ * Copyright (c) 2026, Datadog, Inc. All rights reserved.
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -157,8 +158,11 @@ public class AgentEditorUi {
 		Stream.of(actions).forEach((action) -> action.setEnabled(false));
 
 		PresetSelectorWizardPage presetSelector = new PresetSelectorWizardPage();
-		if (new OnePageWizardDialog(Display.getCurrent().getActiveShell(), presetSelector).open() != Window.OK) {
+		// Bail on cancel, and on OK without a selection (e.g. an empty preset list).
+		if (new OnePageWizardDialog(Display.getCurrent().getActiveShell(), presetSelector).open() != Window.OK
+				|| presetSelector.getSelectedPreset() == null) {
 			Stream.of(actions).forEach((action) -> action.setEnabled(true));
+			return;
 		}
 
 		try {

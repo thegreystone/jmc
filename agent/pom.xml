@@ -219,6 +219,7 @@
 						<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
 							<manifestEntries>
 								<Automatic-Module-Name>org.openjdk.jmc.agent</Automatic-Module-Name>
+								<Implementation-Version>${revision}${changelist}</Implementation-Version>
 								<Agent-Class>org.openjdk.jmc.agent.Agent</Agent-Class>
 								<Premain-Class>org.openjdk.jmc.agent.Agent</Premain-Class>
 								<Can-Retransform-Classes>true</Can-Retransform-Classes>

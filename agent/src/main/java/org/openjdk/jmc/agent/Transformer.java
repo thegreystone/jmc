@@ -36,6 +36,7 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.security.ProtectionDomain;
 import java.util.List;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -77,7 +78,6 @@ public class Transformer implements ClassFileTransformer {
 			// FIXME: Optimization, should do all transforms to one class in one go, instead of creating one class writer per transform.
 			classfileBuffer = doTransform(td, classfileBuffer, definingClassLoader, classBeingRedefined,
 					protectionDomain);
-			td.setPendingTransforms(false);
 		}
 		return classfileBuffer;
 	}
@@ -88,50 +88,68 @@ public class Transformer implements ClassFileTransformer {
 		if (td instanceof CollectionTransformDescriptor) {
 			return doCollectionTracking((CollectionTransformDescriptor) td, classfileBuffer);
 		}
-		return doJFRLogging((JFRTransformDescriptor) td, classfileBuffer, definingClassLoader, classBeingRedefined,
-				protectionDomain);
+		if (td instanceof JFRTransformDescriptor) {
+			return doJFRLogging((JFRTransformDescriptor) td, classfileBuffer, definingClassLoader, classBeingRedefined,
+					protectionDomain);
+		}
+		// A ClassCastException here would be swallowed by the JVM, silently leaving the class
+		// uninstrumented - log instead.
+		Logger.getLogger(getClass().getName()).severe("Unknown transform descriptor type: " + td.getClass().getName()); //$NON-NLS-1$
+		return classfileBuffer;
 	}
 
 	private byte[] doCollectionTracking(CollectionTransformDescriptor td, byte[] classfileBuffer) {
 		if (!CollectionResizeEmitter.isInstalled()) {
 			// No bridge defined (init failed, or not enabled) - weaving the call would throw
-			// NoClassDefFoundError out of the JDK method. Leave the class untouched.
+			// NoClassDefFoundError out of the JDK method. Leave the class untouched; the descriptor
+			// stays pending so a later retransform retries the weave.
 			return classfileBuffer;
 		}
-		try {
-			ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-			ClassVisitor visitor = new CollectionResizeClassVisitor(classWriter, td);
-			ClassReader reader = new ClassReader(classfileBuffer);
-			reader.accept(visitor, ClassReader.EXPAND_FRAMES);
-			return classWriter.toByteArray();
-		} catch (Throwable t) {
-			Logger.getLogger(getClass().getName()).log(Level.SEVERE,
-					"Failed to instrument collection class " + td.getClassName(), t); //$NON-NLS-1$
+		byte[] woven = weave(classfileBuffer, classWriter -> new CollectionResizeClassVisitor(classWriter, td),
+				"collection class " + td.getClassName()); //$NON-NLS-1$
+		if (woven == null) {
+			// Weave failed; the descriptor stays pending so a later retransform retries.
 			return classfileBuffer;
 		}
+		td.setPendingTransforms(false);
+		return woven;
 	}
 
 	private byte[] doJFRLogging(
 		JFRTransformDescriptor td, byte[] classfileBuffer, ClassLoader definingClassLoader,
 		Class<?> classBeingRedefined, ProtectionDomain protectionDomain) {
+		td.setPendingTransforms(false);
 		if (VersionUtils.getAvailableJFRVersion() == JFRVersion.NONE) {
 			Logger.getLogger(getClass().getName()).log(Level.SEVERE,
 					"Could not find JFR classes. Failed to instrument " + td.getMethod().toString()); //$NON-NLS-1$
 			return classfileBuffer;
 		}
+		byte[] woven = weave(classfileBuffer,
+				classWriter -> VersionUtils.getAvailableJFRVersion() == JFRVersion.JFRNEXT
+						? new JFRClassVisitor(classWriter, td, definingClassLoader, classBeingRedefined,
+								protectionDomain)
+						: new JFRLegacyClassVisitor(classWriter, td, definingClassLoader, classBeingRedefined,
+								protectionDomain),
+				td.getMethod().toString());
+		return woven != null ? woven : classfileBuffer;
+	}
+
+	/**
+	 * Runs the class bytes through the supplied visitor.
+	 *
+	 * @return the woven class bytes, or {@code null} if the weave failed (never let a broken weave
+	 *         take down the class load/retransform).
+	 */
+	private byte[] weave(byte[] classfileBuffer, Function<ClassWriter, ClassVisitor> visitorFactory, String target) {
 		try {
 			ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-			ClassVisitor visitor = VersionUtils.getAvailableJFRVersion() == JFRVersion.JFRNEXT
-					? new JFRClassVisitor(classWriter, td, definingClassLoader, classBeingRedefined, protectionDomain)
-					: new JFRLegacyClassVisitor(classWriter, td, definingClassLoader, classBeingRedefined,
-							protectionDomain);
+			ClassVisitor visitor = visitorFactory.apply(classWriter);
 			ClassReader reader = new ClassReader(classfileBuffer);
 			reader.accept(visitor, ClassReader.EXPAND_FRAMES);
 			return classWriter.toByteArray();
 		} catch (Throwable t) {
-			Logger.getLogger(getClass().getName()).log(Level.SEVERE,
-					"Failed to instrument " + td.getMethod().toString(), t); //$NON-NLS-1$
-			return classfileBuffer;
+			Logger.getLogger(getClass().getName()).log(Level.SEVERE, "Failed to instrument " + target, t); //$NON-NLS-1$
+			return null;
 		}
 	}
 }

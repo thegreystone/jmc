@@ -60,9 +60,9 @@ import org.openjdk.jmc.agent.util.ModuleUtils;
  */
 public class Agent {
 	/**
-	 * This should be generated as part of the build later.
+	 * The agent version, read from the Implementation-Version attribute of the agent jar manifest.
 	 */
-	public static final String VERSION = "1.0.0"; //$NON-NLS-1$
+	public static final String VERSION = determineVersion();
 	private static boolean loadedDynamically = false;
 
 	/**
@@ -117,8 +117,11 @@ public class Agent {
 		if (collectionTracking.isEnabled()) {
 			try {
 				CollectionResizeEmitter.init(collectionTracking.getMinSize());
-			} catch (Exception e) {
-				getLogger().log(Level.SEVERE, "Failed to initialize collection resize tracking; disabling it", e); //$NON-NLS-1$
+			} catch (Throwable t) {
+				// Throwable, not Exception: a missing jdk.jfr module (NoClassDefFoundError) or an
+				// inaccessible Unsafe (ExceptionInInitializerError) must disable the capability, not
+				// escape premain and abort JVM startup.
+				getLogger().log(Level.SEVERE, "Failed to initialize collection resize tracking; disabling it", t); //$NON-NLS-1$
 				registry.disableCollectionTracking();
 			}
 		}
@@ -192,6 +195,13 @@ public class Agent {
 
 	private static void printVersion() {
 		getLogger().info(String.format("JMC BCI agent v%s", VERSION)); //$NON-NLS-1$
+	}
+
+	private static String determineVersion() {
+		Package agentPackage = Agent.class.getPackage();
+		String version = agentPackage == null ? null : agentPackage.getImplementationVersion();
+		// null when not running from the shaded agent jar, e.g. from an IDE or unit tests.
+		return version == null ? "unknown" : version; //$NON-NLS-1$
 	}
 
 	/**

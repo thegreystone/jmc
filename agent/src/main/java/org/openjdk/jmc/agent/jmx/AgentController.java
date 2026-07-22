@@ -73,6 +73,11 @@ public class AgentController implements AgentControllerMXBean {
 				logger.severe("Failed to identify transformations: " + xmlDescription);
 				throw e;
 			}
+			// Also retransform (unweave) the classes whose transforms were removed by the modify,
+			// but skip classes whose transforms are present and unchanged - needlessly
+			// retransforming e.g. the hot JDK collection classes on every config push would cause
+			// a deoptimization storm each time.
+			initialClasses.removeAll(registry.getClassNames());
 			modifiedClasses.addAll(initialClasses);
 			classesToRetransformArray = retransformClasses(modifiedClasses);
 		}

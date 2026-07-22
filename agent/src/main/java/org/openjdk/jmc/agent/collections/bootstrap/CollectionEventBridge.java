@@ -47,6 +47,10 @@ import java.lang.invoke.MethodHandle;
 public final class CollectionEventBridge {
 
 	private static volatile MethodHandle resizeHandle;
+	// Threshold mirrored from the emitter (see setMinSize) so the dominant below-threshold case
+	// exits on a simple field compare instead of crossing the mutable - hence not inlinable -
+	// MethodHandle. Effectively disabled until the emitter pushes the configured value.
+	private static volatile long minSize = Long.MAX_VALUE;
 
 	private CollectionEventBridge() {
 	}
@@ -62,10 +66,23 @@ public final class CollectionEventBridge {
 	}
 
 	/**
+	 * Sets the fast-filter threshold (called reflectively by the emitter at init and on retunes).
+	 *
+	 * @param newMinSize
+	 *            the minimum collection size (entry count) before a resize is forwarded.
+	 */
+	public static void setMinSize(long newMinSize) {
+		minSize = newMinSize;
+	}
+
+	/**
 	 * Invoked by the instrumented resize methods. Arrays are passed as {@link Object} so no
 	 * capacity computation is woven into the hot class; the emitter derives the capacities.
 	 */
 	public static void onResize(Object collection, long size, Object oldArray, Object newArray) {
+		if (size < minSize) {
+			return;
+		}
 		MethodHandle h = resizeHandle;
 		if (h == null) {
 			return;

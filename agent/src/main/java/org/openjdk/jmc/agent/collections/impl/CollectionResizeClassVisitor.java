@@ -36,6 +36,7 @@ package org.openjdk.jmc.agent.collections.impl;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.openjdk.jmc.agent.Agent;
 import org.openjdk.jmc.agent.collections.CollectionTransformDescriptor;
 
 /**
@@ -45,6 +46,7 @@ import org.openjdk.jmc.agent.collections.CollectionTransformDescriptor;
 public class CollectionResizeClassVisitor extends ClassVisitor {
 
 	private final CollectionTransformDescriptor descriptor;
+	private boolean matchFound;
 
 	public CollectionResizeClassVisitor(ClassVisitor classVisitor, CollectionTransformDescriptor descriptor) {
 		super(Opcodes.ASM9, classVisitor);
@@ -55,10 +57,23 @@ public class CollectionResizeClassVisitor extends ClassVisitor {
 	public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
 		MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
 		if (name.equals(descriptor.getMethod().getName()) && desc.equals(descriptor.getMethod().getSignature())) {
+			matchFound = true;
 			return new CollectionResizeAdvisor(mv, access, name, desc, descriptor.getClassName(),
 					descriptor.getArrayFieldName(), descriptor.getArrayFieldDescriptor(),
 					descriptor.getSizeAccessorName(), descriptor.isSizeMethod());
 		}
 		return mv;
+	}
+
+	@Override
+	public void visitEnd() {
+		if (!matchFound) {
+			// The baked-in target is a JDK-private method; if a JDK update renames or re-signatures
+			// it, surface that instead of silently emitting no events for this collection.
+			Agent.getLogger().warning("Collection tracking: method " + descriptor.getMethod().getName() //$NON-NLS-1$
+					+ descriptor.getMethod().getSignature() + " not found in " + descriptor.getClassName() //$NON-NLS-1$
+					+ "; no resize events will be emitted for this collection type."); //$NON-NLS-1$
+		}
+		super.visitEnd();
 	}
 }

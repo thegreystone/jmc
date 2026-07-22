@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2019, 2025, Red Hat Inc. All rights reserved.
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -54,6 +54,12 @@ public class TestRetrieveEventProbes {
 			+ "<descriptor>()V</descriptor>" + "</method>" + "<location>WRAP</location>" + "</event>" + "</events>"
 			+ "</jfragent>";
 
+	// The read-back configuration always renders the effective collection tracking state
+	// explicitly, since an omitted collectiontracking element means "no change" rather than
+	// "disabled".
+	private static final String XML_EXPECTED_RETRIEVED = XML_TEST_DESCRIPTION.replace("</jfragent>",
+			"<collectiontracking enabled=\"false\"/></jfragent>");
+
 	@Test
 	public void testRetrieveEventProbes() throws Exception {
 		AgentControllerMXBean mbean = JMX.newMXBeanProxy(ManagementFactory.getPlatformMBeanServer(),
@@ -61,7 +67,7 @@ public class TestRetrieveEventProbes {
 
 		Assert.assertNotEquals(mbean.retrieveEventProbes(), XML_TEST_DESCRIPTION);
 		mbean.defineEventProbes(XML_TEST_DESCRIPTION);
-		Assert.assertEquals(mbean.retrieveEventProbes(), XML_TEST_DESCRIPTION);
+		Assert.assertEquals(XML_EXPECTED_RETRIEVED, mbean.retrieveEventProbes());
 	}
 
 	@Test

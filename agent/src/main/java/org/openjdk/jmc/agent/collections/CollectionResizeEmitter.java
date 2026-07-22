@@ -37,7 +37,6 @@ import java.io.InputStream;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 
 import org.openjdk.jmc.agent.util.IOToolkit;
@@ -64,6 +63,8 @@ public final class CollectionResizeEmitter {
 	// Effectively disabled until init() installs a real threshold.
 	private static volatile int minSize = Integer.MAX_VALUE;
 	private static volatile boolean initialized;
+	// The bridge's setMinSize(long), so threshold retunes also update the bridge-side fast filter.
+	private static volatile Method bridgeSetMinSize;
 
 	private CollectionResizeEmitter() {
 	}
@@ -100,7 +101,30 @@ public final class CollectionResizeEmitter {
 		Method install = bridge.getMethod("install", MethodHandle.class); //$NON-NLS-1$
 		install.invoke(null, resizeHandle);
 
+		bridgeSetMinSize = bridge.getMethod("setMinSize", long.class); //$NON-NLS-1$
+		pushMinSizeToBridge(configuredMinSize);
+
 		initialized = true;
+	}
+
+	/**
+	 * Single entry point for the enable/retune protocol: installs the emitter on first use (with
+	 * the explicit {@code minsize}, or the default when unspecified), and retunes the threshold of
+	 * an already-installed emitter only when an explicit {@code minsize} was given - an omitted
+	 * {@code minsize} keeps the current server-side threshold. Clients always see the effective
+	 * value: the registry renders it explicitly in the read-back configuration.
+	 *
+	 * @param explicitMinSize
+	 *            the explicitly configured {@code minsize}, or {@code null} if unspecified.
+	 * @throws Exception
+	 *             if the bridge could not be defined or wired up.
+	 */
+	public static synchronized void installOrRetune(Integer explicitMinSize) throws Exception {
+		if (!initialized) {
+			init(explicitMinSize != null ? explicitMinSize.intValue() : CollectionTrackingSettings.DEFAULT_MIN_SIZE);
+		} else if (explicitMinSize != null) {
+			setMinSize(explicitMinSize.intValue());
+		}
 	}
 
 	/**
@@ -113,9 +137,22 @@ public final class CollectionResizeEmitter {
 
 	/**
 	 * Retunes the emit threshold on an already-installed emitter (used by the JMX retune path).
+	 * Also updates the bridge-side fast filter.
 	 */
 	public static void setMinSize(int newMinSize) {
 		minSize = newMinSize;
+		pushMinSizeToBridge(newMinSize);
+	}
+
+	private static void pushMinSizeToBridge(long newMinSize) {
+		Method setter = bridgeSetMinSize;
+		if (setter != null) {
+			try {
+				setter.invoke(null, newMinSize);
+			} catch (Exception e) {
+				// The bridge keeps its previous threshold; this emitter still filters correctly.
+			}
+		}
 	}
 
 	/**
@@ -134,8 +171,14 @@ public final class CollectionResizeEmitter {
 	}
 
 	private static void emit(Object collection, long size, Object oldArray, Object newArray) {
-		// Cheapest check first.
+		// Cheapest check first, then the JFR enablement check: with the event disabled or no
+		// recording running (the recommended steady state), bail before any ThreadLocal traffic or
+		// capacity work. The event allocation before the early exit is scalar-replaceable.
 		if (size < minSize) {
+			return;
+		}
+		CollectionResizeEvent event = new CollectionResizeEvent();
+		if (!event.shouldCommit()) {
 			return;
 		}
 		if (IN_EMIT.get()) {
@@ -150,10 +193,6 @@ public final class CollectionResizeEmitter {
 		// Extension point for an adaptive subsampler (e.g. a PID rate limiter). Omitted from the OSS agent.
 		IN_EMIT.set(Boolean.TRUE);
 		try {
-			CollectionResizeEvent event = new CollectionResizeEvent();
-			if (!event.shouldCommit()) {
-				return;
-			}
 			event.collectionClass = collection.getClass();
 			event.id = System.identityHashCode(collection) & 0xFFFFFFFFL;
 			event.size = size;
@@ -169,7 +208,9 @@ public final class CollectionResizeEmitter {
 	}
 
 	private static long capacity(Object array) {
-		return array == null ? 0L : Array.getLength(array);
+		// All tracked backing arrays are reference arrays (HashMap$Node[], Object[],
+		// Hashtable$Entry[]), so a cast beats reflective Array.getLength in the interpreter.
+		return array == null ? 0L : ((Object[]) array).length;
 	}
 
 	private static byte[] readBridgeBytes() throws Exception {

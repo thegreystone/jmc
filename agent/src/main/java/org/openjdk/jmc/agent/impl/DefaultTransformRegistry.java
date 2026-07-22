@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.StringReader;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -47,15 +48,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import javax.xml.XMLConstants;
 import javax.xml.namespace.QName;
+import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
@@ -75,6 +82,10 @@ import org.openjdk.jmc.agent.collections.CollectionTransformDescriptor;
 import org.openjdk.jmc.agent.jfr.JFRTransformDescriptor;
 import org.openjdk.jmc.agent.util.IOToolkit;
 import org.openjdk.jmc.agent.util.TypeUtils;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 public class DefaultTransformRegistry implements TransformRegistry {
@@ -91,13 +102,20 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	// Collection resize tracking capability
 	private static final String XML_ELEMENT_COLLECTION_TRACKING = "collectiontracking"; //$NON-NLS-1$
 	private static final String XML_ATTRIBUTE_NAME_MINSIZE = "minsize"; //$NON-NLS-1$
+	private static final String XML_ATTRIBUTE_NAME_ENABLED = "enabled"; //$NON-NLS-1$
+
+	private static final String EMPTY_ROOT_DOCUMENT = "<jfragent/>"; //$NON-NLS-1$
+	private static final String XML_PARSER_DISALLOW_DOCTYPE = "http://apache.org/xml/features/disallow-doctype-decl"; //$NON-NLS-1$
 
 	// Logging
 	private static final Logger logger = Logger.getLogger("DefaultTransformRegistry");
 
 	// Maps class name -> Transform Descriptors
-	// First step in update should be to check if we even have transformations for the given class
-	private final HashMap<String, List<TransformDescriptor>> transformData = new HashMap<>();
+	// First step in update should be to check if we even have transformations for the given class.
+	// The map is concurrent and the lists are copy-on-write (never mutated once published): the
+	// Transformer iterates them on class-load/retransform threads while JMX pushes mutate the
+	// registry.
+	private final ConcurrentHashMap<String, List<TransformDescriptor>> transformData = new ConcurrentHashMap<>();
 
 	private volatile boolean revertInstrumentation;
 
@@ -186,7 +204,7 @@ public class DefaultTransformRegistry implements TransformRegistry {
 			streamReader.next();
 		}
 		if (registry.collectionTrackingSettings.isEnabled()) {
-			registry.addCollectionTrackingTransforms(null);
+			registry.addCollectionTrackingTransforms(null, null);
 		}
 		try {
 			configuration.reset();
@@ -198,46 +216,91 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	}
 
 	private void add(TransformDescriptor td) {
-		List<TransformDescriptor> transformDataList = transformData.get(td.getClassName());
-		if (transformDataList == null) {
-			transformDataList = new ArrayList<>();
-			transformData.put(td.getClassName(), transformDataList);
-		}
-		transformDataList.add(td);
+		// Copy-on-write: a list published in transformData is never mutated, since the Transformer
+		// may be iterating it concurrently.
+		List<TransformDescriptor> existing = transformData.get(td.getClassName());
+		List<TransformDescriptor> updated = existing == null ? new ArrayList<>() : new ArrayList<>(existing);
+		updated.add(td);
+		transformData.put(td.getClassName(), updated);
 	}
 
 	/**
 	 * Registers the fixed, hidden collection resize instrumentation points (idempotently). These
 	 * bypass the JFR-specific {@link #validate} step since they are not user-defined event probes.
-	 * When {@code modifiedClasses} is non-null the classes are also marked so they get (re)woven.
+	 * When the sets are non-null, {@code retainedClasses} receives all tracked class names (so they
+	 * survive {@link #clearAllOtherTransformData}), while {@code modifiedClasses} only receives
+	 * classes whose woven state actually changes - re-enabling already-active tracking must not
+	 * needlessly retransform (and deoptimize) the hot JDK collection classes.
 	 */
-	private void addCollectionTrackingTransforms(Set<String> modifiedClasses) {
+	private void addCollectionTrackingTransforms(Set<String> modifiedClasses, Set<String> retainedClasses) {
 		for (CollectionTransformDescriptor descriptor : CollectionTransformDescriptor.all()) {
-			if (modifiedClasses != null) {
+			if (retainedClasses != null) {
+				retainedClasses.add(descriptor.getClassName());
+			}
+			CollectionTransformDescriptor present = findCollectionDescriptor(descriptor.getClassName());
+			if (present == null) {
+				add(descriptor);
+				if (modifiedClasses != null) {
+					modifiedClasses.add(descriptor.getClassName());
+				}
+			} else if (present.isPendingTransforms() && modifiedClasses != null) {
+				// The descriptor is registered but its weave never succeeded (the bridge was not
+				// installed at transform time, or the weave threw). Retransform to retry rather
+				// than leaving the class silently uninstrumented on an identical re-push.
 				modifiedClasses.add(descriptor.getClassName());
 			}
-			List<TransformDescriptor> existing = transformData.get(descriptor.getClassName());
-			boolean present = false;
-			if (existing != null) {
-				for (TransformDescriptor td : existing) {
-					if (td instanceof CollectionTransformDescriptor) {
-						present = true;
-						break;
-					}
+		}
+	}
+
+	private CollectionTransformDescriptor findCollectionDescriptor(String className) {
+		List<TransformDescriptor> existing = transformData.get(className);
+		if (existing != null) {
+			for (TransformDescriptor td : existing) {
+				if (td instanceof CollectionTransformDescriptor) {
+					return (CollectionTransformDescriptor) td;
 				}
 			}
-			if (!present) {
-				add(descriptor);
-			}
 		}
+		return null;
+	}
+
+	/**
+	 * Removes only the descriptors of one kind from a class's transform list, leaving descriptors
+	 * of the other kind in place - collection tracking descriptors and user-defined JFR probes
+	 * share the class-keyed {@code transformData} map and must never clobber each other.
+	 *
+	 * @param className
+	 *            the internal class name whose list to prune.
+	 * @param collectionDescriptors
+	 *            {@code true} to remove {@link CollectionTransformDescriptor}s, {@code false} to
+	 *            remove the (JFR probe) descriptors that are not.
+	 * @return {@code true} if at least one descriptor was removed.
+	 */
+	private boolean removeTransformDescriptors(String className, boolean collectionDescriptors) {
+		List<TransformDescriptor> existing = transformData.get(className);
+		if (existing == null) {
+			return false;
+		}
+		// Copy-on-write, see add(): the published list must not be mutated.
+		List<TransformDescriptor> kept = new ArrayList<>(existing);
+		boolean removed = kept.removeIf(td -> (td instanceof CollectionTransformDescriptor) == collectionDescriptors);
+		if (kept.isEmpty()) {
+			transformData.remove(className);
+		} else if (removed) {
+			transformData.put(className, kept);
+		}
+		return removed;
 	}
 
 	@Override
 	public void disableCollectionTracking() {
 		collectionTrackingSettings = CollectionTrackingSettings.disabled();
 		for (CollectionTransformDescriptor descriptor : CollectionTransformDescriptor.all()) {
-			transformData.remove(descriptor.getClassName());
+			removeTransformDescriptors(descriptor.getClassName(), true);
 		}
+		// Keep the read-back configuration truthful, e.g. when called on an init failure after the
+		// startup configuration (with tracking enabled) was already stored.
+		currentConfiguration = renderEffectiveConfiguration(currentConfiguration);
 	}
 
 	/**
@@ -246,22 +309,22 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	 * a significant deoptimization storm - prefer enabling at startup, and prefer disabling the JFR
 	 * event in the recording over unweaving (which is a second deopt storm).
 	 */
-	private void enableCollectionTracking(XMLStreamReader streamReader, Set<String> modifiedClasses) {
+	private void enableCollectionTracking(
+		XMLStreamReader streamReader, Set<String> modifiedClasses, Set<String> retainedClasses) {
 		String minSizeValue = streamReader.getAttributeValue("", XML_ATTRIBUTE_NAME_MINSIZE); //$NON-NLS-1$
-		int minSize = parseMinSize(minSizeValue);
+		// Only an explicit minsize retunes the live threshold; a bare element keeps it.
+		Integer explicitMinSize = (minSizeValue == null || minSizeValue.trim().isEmpty()) ? null
+				: Integer.valueOf(parseMinSize(minSizeValue));
 		try {
-			// init() installs the bridge on first enable and is a no-op afterwards (it does not retune).
-			CollectionResizeEmitter.init(minSize);
-			if (minSizeValue != null && !minSizeValue.trim().isEmpty()) {
-				// Only an explicit minsize retunes the live threshold; a bare element keeps it.
-				CollectionResizeEmitter.setMinSize(minSize);
-			}
-		} catch (Exception e) {
-			logger.log(Level.SEVERE, "Failed to initialize collection resize tracking; it will not be enabled", e); //$NON-NLS-1$
+			CollectionResizeEmitter.installOrRetune(explicitMinSize);
+		} catch (Throwable t) {
+			// Throwable: a missing jdk.jfr module or inaccessible Unsafe surfaces as an Error and
+			// must not escape into the JMX call.
+			logger.log(Level.SEVERE, "Failed to initialize collection resize tracking; it will not be enabled", t); //$NON-NLS-1$
 		}
 		if (CollectionResizeEmitter.isInstalled()) {
 			collectionTrackingSettings = CollectionTrackingSettings.enabled(CollectionResizeEmitter.getMinSize());
-			addCollectionTrackingTransforms(modifiedClasses);
+			addCollectionTrackingTransforms(modifiedClasses, retainedClasses);
 		}
 	}
 
@@ -282,8 +345,24 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	}
 
 	private static CollectionTrackingSettings parseCollectionTracking(XMLStreamReader streamReader) {
+		if (!parseEnabled(streamReader)) {
+			return CollectionTrackingSettings.disabled();
+		}
 		return CollectionTrackingSettings
 				.enabled(parseMinSize(streamReader.getAttributeValue("", XML_ATTRIBUTE_NAME_MINSIZE))); //$NON-NLS-1$
+	}
+
+	/**
+	 * @return the value of the {@code enabled} attribute on the current element; an absent
+	 *         attribute means enabled. The xs:boolean lexical space is {@code true|false|1|0}.
+	 */
+	private static boolean parseEnabled(XMLStreamReader streamReader) {
+		String value = streamReader.getAttributeValue("", XML_ATTRIBUTE_NAME_ENABLED); //$NON-NLS-1$
+		if (value == null) {
+			return true;
+		}
+		String trimmed = value.trim();
+		return !("false".equals(trimmed) || "0".equals(trimmed)); //$NON-NLS-1$ //$NON-NLS-2$
 	}
 
 	private static boolean validate(DefaultTransformRegistry registry, TransformDescriptor td) {
@@ -598,17 +677,25 @@ public class DefaultTransformRegistry implements TransformRegistry {
 			disableExternalEntityProcessing(inputFactory);
 			XMLStreamReader streamReader = inputFactory.createXMLStreamReader(reader);
 			HashMap<String, String> globalDefaults = new HashMap<String, String>();
+			// Classes whose transforms changed in this push; returned so the caller retransforms them.
 			Set<String> modifiedClasses = new HashSet<>();
-			boolean collectionTrackingPresent = false;
+			// Classes kept alive by unchanged collection tracking; retained but not retransformed.
+			Set<String> retainedClasses = new HashSet<>();
+			// Classes that got an <event> probe in this push; their stale JFR probes are purged once.
+			Set<String> declaredEventClasses = new HashSet<>();
+			boolean collectionTrackingDisabled = false;
 			logger.info(xmlDescription);
 			while (streamReader.hasNext()) {
 				if (streamReader.isStartElement()) {
 					QName element = streamReader.getName();
 					if (XML_ELEMENT_NAME_EVENT.equals(element.getLocalPart())) {
 						TransformDescriptor td = parseTransformData(streamReader, globalDefaults);
-						if (modifiedClasses.add(td.getClassName())) {
-							transformData.remove(td.getClassName());
+						if (declaredEventClasses.add(td.getClassName())) {
+							// Purge only the JFR probes from the previous configuration; a collection
+							// tracking descriptor on the same class must survive.
+							removeTransformDescriptors(td.getClassName(), false);
 						}
+						modifiedClasses.add(td.getClassName());
 						if (validate(this, td)) {
 							add(td);
 						}
@@ -616,20 +703,38 @@ public class DefaultTransformRegistry implements TransformRegistry {
 					} else if (XML_ELEMENT_CONFIGURATION.equals(element.getLocalPart())) {
 						readGlobalConfig(streamReader, globalDefaults);
 					} else if (XML_ELEMENT_COLLECTION_TRACKING.equals(element.getLocalPart())) {
-						collectionTrackingPresent = true;
-						enableCollectionTracking(streamReader, modifiedClasses);
+						if (parseEnabled(streamReader)) {
+							enableCollectionTracking(streamReader, modifiedClasses, retainedClasses);
+						} else {
+							collectionTrackingDisabled = true;
+						}
 					}
 				}
 				streamReader.next();
 			}
-			if (!collectionTrackingPresent) {
-				// Omitted -> revert, matching the JFR-probe model. The descriptors are dropped by
-				// clearAllOtherTransformData below and the classes retransformed to their original
-				// (unwoven) bytecode by the caller.
-				collectionTrackingSettings = CollectionTrackingSettings.disabled();
+			if (collectionTrackingDisabled) {
+				// Only an explicit enabled="false" disables: the descriptors are dropped here, fully
+				// unreferenced classes are dropped by clearAllOtherTransformData below, and the JMX
+				// caller retransforms all dropped classes back to their original (unwoven) bytecode.
+				// An OMITTED element leaves the capability untouched (clients that do not know about
+				// it - older consoles, preset models dropping unknown elements - must not toggle it),
+				// so the tracked classes are retained below like any other unchanged transform.
+				disableCollectionTracking();
+			} else if (collectionTrackingSettings.isEnabled()) {
+				addCollectionTrackingTransforms(null, retainedClasses);
 			}
-			currentConfiguration = xmlDescription;
-			clearAllOtherTransformData(modifiedClasses);
+			// Tracked collection classes survive clearAllOtherTransformData, so stale JFR probes on
+			// them from the previous configuration must be purged here (and the class rewoven) unless
+			// this push re-declared probes for the class.
+			for (String className : retainedClasses) {
+				if (!declaredEventClasses.contains(className) && removeTransformDescriptors(className, false)) {
+					modifiedClasses.add(className);
+				}
+			}
+			setCurrentConfiguration(xmlDescription);
+			Set<String> classesToKeep = new HashSet<>(modifiedClasses);
+			classesToKeep.addAll(retainedClasses);
+			clearAllOtherTransformData(classesToKeep);
 			return modifiedClasses;
 		} catch (XMLStreamException xse) {
 			logger.log(Level.SEVERE, "Failed to create XML Stream Reader", xse);
@@ -677,7 +782,59 @@ public class DefaultTransformRegistry implements TransformRegistry {
 
 	@Override
 	public void setCurrentConfiguration(String configuration) {
-		currentConfiguration = configuration;
+		currentConfiguration = renderEffectiveConfiguration(configuration);
+	}
+
+	/**
+	 * Renders the effective collection tracking state into a configuration document: any
+	 * {@code collectiontracking} element in the input is replaced by
+	 * {@code <collectiontracking enabled="true|false" minsize="N"/>} reflecting the live state
+	 * ({@code minsize} only when enabled), and the element is added if absent. This keeps the
+	 * read-back configuration truthful under the omission-is-no-change contract, where the pushed
+	 * document alone does not describe the tracking state, and makes read-back/re-push round trips
+	 * stable for clients unaware of the capability.
+	 *
+	 * @param xmlConfiguration
+	 *            the pushed (schema-validated) configuration, possibly empty.
+	 * @return the configuration with the effective tracking state rendered in, or the input
+	 *         verbatim if it could not be parsed.
+	 */
+	private String renderEffectiveConfiguration(String xmlConfiguration) {
+		String base = xmlConfiguration == null || xmlConfiguration.trim().isEmpty() ? EMPTY_ROOT_DOCUMENT
+				: xmlConfiguration;
+		try {
+			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+			factory.setFeature(XML_PARSER_DISALLOW_DOCTYPE, true);
+			Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(base)));
+			Element root = document.getDocumentElement();
+			Node child = root.getFirstChild();
+			while (child != null) {
+				Node next = child.getNextSibling();
+				if (child.getNodeType() == Node.ELEMENT_NODE
+						&& XML_ELEMENT_COLLECTION_TRACKING.equals(child.getNodeName())) {
+					root.removeChild(child);
+				}
+				child = next;
+			}
+			CollectionTrackingSettings settings = collectionTrackingSettings;
+			Element tracking = document.createElement(XML_ELEMENT_COLLECTION_TRACKING);
+			tracking.setAttribute(XML_ATTRIBUTE_NAME_ENABLED, Boolean.toString(settings.isEnabled()));
+			if (settings.isEnabled()) {
+				tracking.setAttribute(XML_ATTRIBUTE_NAME_MINSIZE, Integer.toString(settings.getMinSize()));
+			}
+			root.appendChild(tracking);
+			TransformerFactory transformerFactory = TransformerFactory.newInstance();
+			transformerFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			javax.xml.transform.Transformer serializer = transformerFactory.newTransformer();
+			serializer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes"); //$NON-NLS-1$
+			StringWriter writer = new StringWriter();
+			serializer.transform(new DOMSource(document), new StreamResult(writer));
+			return writer.toString();
+		} catch (Exception e) {
+			logger.log(Level.WARNING, "Could not render the effective collection tracking state into the read-back" //$NON-NLS-1$
+					+ " configuration; storing the pushed configuration verbatim", e); //$NON-NLS-1$
+			return xmlConfiguration;
+		}
 	}
 
 	@Override
