@@ -54,9 +54,7 @@ public class TestRetrieveEventProbes {
 			+ "<descriptor>()V</descriptor>" + "</method>" + "<location>WRAP</location>" + "</event>" + "</events>"
 			+ "</jfragent>";
 
-	// The read-back configuration always renders the effective collection tracking state
-	// explicitly, since an omitted collectiontracking element means "no change" rather than
-	// "disabled".
+	// The read-back configuration always renders the effective collection tracking state.
 	private static final String XML_EXPECTED_RETRIEVED = XML_TEST_DESCRIPTION.replace("</jfragent>",
 			"<collectiontracking enabled=\"false\"/></jfragent>");
 

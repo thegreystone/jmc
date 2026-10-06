@@ -99,7 +99,6 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	// Global override section
 	private static final String XML_ELEMENT_CONFIGURATION = "config"; //$NON-NLS-1$
 
-	// Collection resize tracking capability
 	private static final String XML_ELEMENT_COLLECTION_TRACKING = "collectiontracking"; //$NON-NLS-1$
 	private static final String XML_ATTRIBUTE_NAME_MINSIZE = "minsize"; //$NON-NLS-1$
 	private static final String XML_ATTRIBUTE_NAME_ENABLED = "enabled"; //$NON-NLS-1$
@@ -229,8 +228,8 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	 * bypass the JFR-specific {@link #validate} step since they are not user-defined event probes.
 	 * When the sets are non-null, {@code retainedClasses} receives all tracked class names (so they
 	 * survive {@link #clearAllOtherTransformData}), while {@code modifiedClasses} only receives
-	 * classes whose woven state actually changes - re-enabling already-active tracking must not
-	 * needlessly retransform (and deoptimize) the hot JDK collection classes.
+	 * classes whose woven state actually changes, so re-enabling active tracking does not
+	 * retransform anything.
 	 */
 	private void addCollectionTrackingTransforms(Set<String> modifiedClasses, Set<String> retainedClasses) {
 		for (CollectionTransformDescriptor descriptor : CollectionTransformDescriptor.all()) {
@@ -713,12 +712,8 @@ public class DefaultTransformRegistry implements TransformRegistry {
 				streamReader.next();
 			}
 			if (collectionTrackingDisabled) {
-				// Only an explicit enabled="false" disables: the descriptors are dropped here, fully
-				// unreferenced classes are dropped by clearAllOtherTransformData below, and the JMX
-				// caller retransforms all dropped classes back to their original (unwoven) bytecode.
-				// An OMITTED element leaves the capability untouched (clients that do not know about
-				// it - older consoles, preset models dropping unknown elements - must not toggle it),
-				// so the tracked classes are retained below like any other unchanged transform.
+				// The JMX caller retransforms the dropped classes back to their unwoven bytecode.
+				// An omitted element leaves tracking untouched, see TransformRegistry#modify.
 				disableCollectionTracking();
 			} else if (collectionTrackingSettings.isEnabled()) {
 				addCollectionTrackingTransforms(null, retainedClasses);
@@ -789,10 +784,8 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	 * Renders the effective collection tracking state into a configuration document: any
 	 * {@code collectiontracking} element in the input is replaced by
 	 * {@code <collectiontracking enabled="true|false" minsize="N"/>} reflecting the live state
-	 * ({@code minsize} only when enabled), and the element is added if absent. This keeps the
-	 * read-back configuration truthful under the omission-is-no-change contract, where the pushed
-	 * document alone does not describe the tracking state, and makes read-back/re-push round trips
-	 * stable for clients unaware of the capability.
+	 * ({@code minsize} only when enabled), and the element is added if absent, since the pushed
+	 * document alone does not describe the tracking state (see {@link #modify}).
 	 *
 	 * @param xmlConfiguration
 	 *            the pushed (schema-validated) configuration, possibly empty.

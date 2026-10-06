@@ -49,8 +49,7 @@ import jdk.jfr.FlightRecorder;
  * <p>
  * The woven resize methods live in bootstrap-loaded classes that cannot see {@code jdk.jfr}, so
  * they call the {@link org.openjdk.jmc.agent.collections.bootstrap.CollectionEventBridge} (defined
- * into the bootstrap loader), which forwards here via a {@link MethodHandle}. The {@code minsize}
- * threshold, the JFR enablement check and any future rate limiter all live in {@link #emit}.
+ * into the bootstrap loader), which forwards here via a {@link MethodHandle}.
  */
 public final class CollectionResizeEmitter {
 
@@ -86,8 +85,6 @@ public final class CollectionResizeEmitter {
 
 		FlightRecorder.register(CollectionResizeEvent.class);
 
-		// Define the bridge into the bootstrap loader (null loader) so bootstrap-loaded collections can
-		// call it - no bootstrap jar, and it works for both premain and agentmain.
 		byte[] bridgeBytes = readBridgeBytes();
 		Class<?> bridge = TypeUtils.defineClass(BRIDGE_CLASS_NAME, bridgeBytes, 0, bridgeBytes.length, null, null);
 		if (bridge == null) {
@@ -110,9 +107,7 @@ public final class CollectionResizeEmitter {
 	/**
 	 * Single entry point for the enable/retune protocol: installs the emitter on first use (with
 	 * the explicit {@code minsize}, or the default when unspecified), and retunes the threshold of
-	 * an already-installed emitter only when an explicit {@code minsize} was given - an omitted
-	 * {@code minsize} keeps the current server-side threshold. Clients always see the effective
-	 * value: the registry renders it explicitly in the read-back configuration.
+	 * an already-installed emitter only when an explicit {@code minsize} was given.
 	 *
 	 * @param explicitMinSize
 	 *            the explicitly configured {@code minsize}, or {@code null} if unspecified.
@@ -173,7 +168,7 @@ public final class CollectionResizeEmitter {
 	private static void emit(Object collection, long size, Object oldArray, Object newArray) {
 		// Cheapest check first, then the JFR enablement check: with the event disabled or no
 		// recording running (the recommended steady state), bail before any ThreadLocal traffic or
-		// capacity work. The event allocation before the early exit is scalar-replaceable.
+		// capacity work.
 		if (size < minSize) {
 			return;
 		}
@@ -190,7 +185,6 @@ public final class CollectionResizeEmitter {
 			// Not an actual growth (e.g. HashMap.resize() returns the same table at MAXIMUM_CAPACITY).
 			return;
 		}
-		// Extension point for an adaptive subsampler (e.g. a PID rate limiter). Omitted from the OSS agent.
 		IN_EMIT.set(Boolean.TRUE);
 		try {
 			event.collectionClass = collection.getClass();
@@ -208,8 +202,7 @@ public final class CollectionResizeEmitter {
 	}
 
 	private static long capacity(Object array) {
-		// All tracked backing arrays are reference arrays (HashMap$Node[], Object[],
-		// Hashtable$Entry[]), so a cast beats reflective Array.getLength in the interpreter.
+		// All tracked backing arrays are reference arrays.
 		return array == null ? 0L : ((Object[]) array).length;
 	}
 

@@ -104,7 +104,7 @@ public class CollectionResizeAdvisor extends AdviceAdapter {
 		} else {
 			mv.visitFieldInsn(GETFIELD, ownerClass, sizeAccessorName, INT_DESCRIPTOR);
 		}
-		// Event size is a long (for future collections like ConcurrentHashMap); widen the int here.
+		// Widen the int size to the event's long.
 		mv.visitInsn(I2L);
 	}
 }

@@ -44,11 +44,11 @@ import org.objectweb.asm.Opcodes;
 import org.openjdk.jmc.agent.util.TypeUtils;
 
 /**
- * Spike/feasibility test for the collection-tracking feature: proves that a class can be defined
- * directly into the <em>bootstrap</em> class loader via {@code Unsafe.defineClass} (by passing a
- * {@code null} defining loader). This is the mechanism that lets bootstrap-loaded classes such as
- * {@code java.util.HashMap} resolve and call our injected event bridge, without needing a bootstrap
- * jar / {@code appendToBootstrapClassLoaderSearch} (which would break the dynamic-attach flow).
+ * Verifies that a class can be defined directly into the <em>bootstrap</em> class loader via
+ * {@code Unsafe.defineClass} (by passing a {@code null} defining loader). This is the mechanism
+ * that lets bootstrap-loaded classes such as {@code java.util.HashMap} resolve and call our
+ * injected event bridge, without needing a bootstrap jar /
+ * {@code appendToBootstrapClassLoaderSearch} (which would break the dynamic-attach flow).
  */
 public class TestBootstrapDefine {
 
@@ -58,15 +58,13 @@ public class TestBootstrapDefine {
 	public void testDefineIntoBootstrapLoader() throws Exception {
 		byte[] bytes = generateProbeClass();
 
-		// The crux: passing null as the defining class loader must place the class in the
-		// bootstrap loader.
+		// Passing null as the defining class loader must place the class in the bootstrap loader.
 		Class<?> defined = TypeUtils.defineClass(PROBE_CLASS_NAME, bytes, 0, bytes.length, null, null);
 
 		assertNotNull("defineClass returned null - Unsafe.defineClass(null loader) not supported here", defined); //$NON-NLS-1$
 		assertNull("Class was not defined in the bootstrap loader (getClassLoader() != null)", //$NON-NLS-1$
 				defined.getClassLoader());
 
-		// And it must be usable.
 		int result = (int) defined.getMethod("probe").invoke(null); //$NON-NLS-1$
 		assertEquals(42, result);
 	}

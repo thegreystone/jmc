@@ -181,9 +181,8 @@ public class AgentEditorUi {
 	private void savePreset() {
 		IPreset preset = presetRepository.createPreset();
 		try {
-			// If there is no currently loaded instrumentation there is nothing to save. Newer agents
-			// always return a document (rendering the collection tracking state), so check for events
-			// rather than relying on an empty string, which only older agents return.
+			// If there is no currently loaded instrumentation there is nothing to save. Check for
+			// events, since newer agents never return an empty document.
 			String probes = helper.retrieveEventProbes();
 			if (probes != null && !probes.isEmpty()) {
 				preset.deserialize(probes);

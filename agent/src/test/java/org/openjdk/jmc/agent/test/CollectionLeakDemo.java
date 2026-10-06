@@ -60,15 +60,9 @@ import jdk.jfr.Recording;
  * which periodically resizes its backing array - exactly the continuous-leak signal the
  * {@code jdk.jmc.CollectionResize} event is meant to surface.
  * <p>
- * Run it with the agent attached and collection tracking enabled, e.g. (see also the agent README):
- *
- * <pre>
- * java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
- *      -Dgurka.record=collection-leak.jfr
- *      -javaagent:agent.jar=collectiontracking_enabled.xml
- *      -cp agent.jar:test-classes org.openjdk.jmc.agent.test.CollectionLeakDemo 100
- * </pre>
- *
+ * Run it with the agent attached and collection tracking enabled; see the agent README for the
+ * command line.
+ * <p>
  * Configuration (command line argument or system property):
  * <ul>
  * <li>{@code interval} (arg 0, or {@code -Dgurka.leak.interval}, default 100): leak 1 in every N
