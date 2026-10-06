@@ -43,13 +43,12 @@
 				<name>printHelloWorldJFR1</name>
 				<descriptor>()V</descriptor>
 			</method>
-			<!-- location {ENTRY, EXIT, WRAP} -->
+			<!-- location {ENTRY, EXIT, WRAP}-->
 			<location>WRAP</location>
 			<fields>
 				<field>
 					<name>'InstrumentMe.STATIC_STRING_FIELD'</name>
-					<description>Capturing outer class field with class name prefixed
-						field name</description>
+					<description>Capturing outer class field with class name prefixed field name</description>
 					<expression>InstrumentMe.STATIC_STRING_FIELD</expression>
 				</field>
 			</fields>

@@ -44,7 +44,7 @@
 				<name>testWithoutException</name>
 				<descriptor>()V</descriptor>
 			</method>
-			<!-- location {ENTRY, EXIT, WRAP} -->
+			<!-- location {ENTRY, EXIT, WRAP}-->
 			<location>WRAP</location>
 		</event>
 	</events>
