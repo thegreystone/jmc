@@ -77,11 +77,13 @@ public class TestRetrieveEventProbes {
 
 		String initialConfiguration = mbean.retrieveEventProbes();
 		String invalidConfiguration = XML_TEST_DESCRIPTION.concat("</jfragent>");
+		boolean exceptionThrown = false;
 		try {
 			mbean.defineEventProbes(invalidConfiguration);
 		} catch (Exception e) {
-			e.printStackTrace();
+			exceptionThrown = true;
 		}
+		Assert.assertTrue(exceptionThrown);
 		Assert.assertEquals(mbean.retrieveEventProbes(), initialConfiguration);
 	}
 
