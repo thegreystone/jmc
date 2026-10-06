@@ -182,9 +182,14 @@ public class AgentEditorUi {
 	private void savePreset() {
 		IPreset preset = presetRepository.createPreset();
 		try {
-			// If there is no currently loaded instrumentation there is nothing to save.
-			if (!helper.retrieveEventProbes().isEmpty()) {
-				preset.deserialize(helper.retrieveEventProbes());
+			// If there is no currently loaded instrumentation there is nothing to save. Newer agents
+			// always return a document (rendering the collection tracking state), so check for events
+			// rather than relying on an empty string, which only older agents return.
+			String probes = helper.retrieveEventProbes();
+			if (probes != null && !probes.isEmpty()) {
+				preset.deserialize(probes);
+			}
+			if (preset.getEvents().length > 0) {
 				presetRepository.addPreset(preset);
 				DialogToolkit.openConfirmOnUiThread(Messages.PresetSelectorWizardPage_SAVE_PRESET_TITLE, MessageFormat
 						.format(Messages.PresetSelectorWizardPage_SAVE_PRESET_MESSAGE, preset.getFileName()));
