@@ -38,11 +38,11 @@ import java.lang.invoke.MethodHandle;
 /**
  * The bootstrap-visible bridge between the instrumented JDK collections and the agent's emitter.
  * <p>
- * Deliberately tiny, depending only on {@code java.base} types ({@link MethodHandle}). It is
- * defined into the bootstrap class loader (via {@code Unsafe.defineClass} with a {@code null}
- * loader) so bootstrap-loaded classes like {@link java.util.HashMap} can call it, and must not
- * reference {@code jdk.jfr} or any agent class (not visible from bootstrap). It forwards to
- * {@code CollectionResizeEmitter} through the {@link MethodHandle} set by {@link #install}.
+ * Depends only on {@code java.base} types ({@link MethodHandle}). It is defined into the bootstrap
+ * class loader (via {@code Unsafe.defineClass} with a {@code null} loader) so bootstrap-loaded
+ * classes like {@link java.util.HashMap} can call it, and must not reference {@code jdk.jfr} or any
+ * agent class (not visible from bootstrap). It forwards to {@code CollectionResizeEmitter} through
+ * the {@link MethodHandle} set by {@link #install}.
  */
 public final class CollectionEventBridge {
 
@@ -90,7 +90,7 @@ public final class CollectionEventBridge {
 		try {
 			h.invokeExact(collection, size, oldArray, newArray);
 		} catch (Throwable t) {
-			// Never allow instrumentation to disrupt the instrumented collection.
+			// A failure here must not break the instrumented collection.
 		}
 	}
 }

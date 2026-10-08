@@ -305,8 +305,8 @@ public class DefaultTransformRegistry implements TransformRegistry {
 	/**
 	 * Enables (or retunes) collection resize tracking from a JMX {@code modify}. Enabling it for
 	 * the first time defines the bootstrap bridge and retransforms hot core JDK collection classes,
-	 * a significant deoptimization storm - prefer enabling at startup, and prefer disabling the JFR
-	 * event in the recording over unweaving (which is a second deopt storm).
+	 * which can cause a lot of deoptimization. Prefer enabling at startup, and prefer disabling the
+	 * JFR event in the recording over unweaving, which retransforms the classes again.
 	 */
 	private void enableCollectionTracking(
 		XMLStreamReader streamReader, Set<String> modifiedClasses, Set<String> retainedClasses) {
@@ -676,11 +676,11 @@ public class DefaultTransformRegistry implements TransformRegistry {
 			disableExternalEntityProcessing(inputFactory);
 			XMLStreamReader streamReader = inputFactory.createXMLStreamReader(reader);
 			HashMap<String, String> globalDefaults = new HashMap<String, String>();
-			// Classes whose transforms changed in this push; returned so the caller retransforms them.
+			// Classes for the caller to retransform.
 			Set<String> modifiedClasses = new HashSet<>();
-			// Classes kept alive by unchanged collection tracking; retained but not retransformed.
+			// Tracked collection classes to keep, without retransforming.
 			Set<String> retainedClasses = new HashSet<>();
-			// Classes that got an <event> probe in this push; their stale JFR probes are purged once.
+			// Classes with an <event> probe in this push.
 			Set<String> declaredEventClasses = new HashSet<>();
 			boolean collectionTrackingDisabled = false;
 			logger.info(xmlDescription);

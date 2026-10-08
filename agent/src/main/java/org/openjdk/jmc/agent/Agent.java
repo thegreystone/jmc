@@ -118,7 +118,7 @@ public class Agent {
 			try {
 				CollectionResizeEmitter.init(collectionTracking.getMinSize());
 			} catch (Throwable t) {
-				// Throwable, not Exception: a missing jdk.jfr module (NoClassDefFoundError) or an
+				// Catch Throwable: a missing jdk.jfr module (NoClassDefFoundError) or an
 				// inaccessible Unsafe (ExceptionInInitializerError) must disable the capability, not
 				// escape premain and abort JVM startup.
 				getLogger().log(Level.SEVERE, "Failed to initialize collection resize tracking; disabling it", t); //$NON-NLS-1$

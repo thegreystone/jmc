@@ -194,9 +194,9 @@ public final class CollectionResizeEmitter {
 			event.newCapacity = newCapacity;
 			event.commit();
 		} catch (Throwable t) {
-			// Never let instrumentation break the instrumented collection.
+			// A failure here must not break the instrumented collection.
 		} finally {
-			// remove(), not set(FALSE), to avoid a lingering ThreadLocalMap entry per emitting thread.
+			// remove() rather than set(FALSE), so no ThreadLocalMap entry is left behind per thread.
 			IN_EMIT.remove();
 		}
 	}

@@ -57,8 +57,8 @@ import jdk.jfr.Recording;
  * <p>
  * For each collection, one in every {@code interval} puts is "leaked" (retained); the rest are
  * added and immediately removed. The retained entries make each collection grow without bound,
- * which periodically resizes its backing array - exactly the continuous-leak signal the
- * {@code jdk.jmc.CollectionResize} event is meant to surface.
+ * which periodically resizes its backing array and produces {@code jdk.jmc.CollectionResize}
+ * events.
  * <p>
  * Run it with the agent attached and collection tracking enabled; see the agent README for the
  * command line.

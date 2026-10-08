@@ -28,7 +28,7 @@ folder.
 
 ### The instrumentation demo
 `InstrumentMe` continuously runs through a set of example methods, and the probe definitions in
-`jfrprobes_template.xml` demonstrate the different ways to instrument them — timing methods and
+`jfrprobes_template.xml` demonstrate the different ways to instrument them, such as timing methods and
 capturing parameters, return values, fields and expressions:
 
 ```bash
@@ -50,7 +50,7 @@ Like the instrumentation demo, it runs until you press `<enter>`. The *Converter
 under the *demo* category, with the `Gurka` parameters captured through the different converters.
 
 ### The collection leak demo
-`CollectionLeakDemo` slowly leaks entries into several different kinds of collections — for each
+`CollectionLeakDemo` slowly leaks entries into several different kinds of collections. For each
 collection, one in every N (default 100) added entries is retained, so the collections grow without
 bound and periodically resize their backing arrays. Run it with
 [collection resize tracking](#collection-resize-tracking) enabled to see the
@@ -60,8 +60,8 @@ bound and periodically resize their backing arrays. Run it with
 java -Dgurka.record=collection-leak.jfr -javaagent:target/agent-1.1.0-SNAPSHOT.jar=target/test-classes/org/openjdk/jmc/agent/test/collectiontracking_enabled.xml -cp target/test-classes/ org.openjdk.jmc.agent.test.CollectionLeakDemo 10
 ```
 
-Let it run for half a minute or so — events start appearing once the collections pass the
-configured `minsize` threshold (128 entries) — then press `<enter>` to stop it and dump the
+Let it run for half a minute or so (events start appearing once the collections pass the
+configured `minsize` threshold of 128 entries), then press `<enter>` to stop it and dump the
 recording to `collection-leak.jfr` (the demo starts the recording itself when `-Dgurka.record` is
 set). In JMC, the events are in the Event Browser under *JMC Agent / Collections*: the leak
 signature is the same collection identity resizing over and over with an ever-growing entry count,
@@ -86,9 +86,9 @@ Then, in JMC:
 1. Find the demo process in the JVM Browser, expand it, and double-click the *JMC Agent* node.
 Since no agent is running in the process yet, this opens the *Start JMC Agent* wizard.
 2. Point *Agent JAR* at the built `agent/target/agent-1.1.0-SNAPSHOT.jar`. Optionally point
-*Agent XML* at a configuration — for example
+*Agent XML* at a configuration, for example
 `target/test-classes/org/openjdk/jmc/agent/test/collectiontracking_enabled.xml`, or
-`jfrprobes_template.xml` for the InstrumentMe demo — or leave it empty and push a configuration
+`jfrprobes_template.xml` for the InstrumentMe demo, or leave it empty and push a configuration
 later. Click *Start*.
 3. The *Agent Live Config* editor opens, showing the live instrumentation in the process. From
 here you can edit probes, load and save presets, and apply new configurations to the running
@@ -97,20 +97,20 @@ process.
 
 No special options are needed on the demo's command line for this: when the agent is loaded
 dynamically it opens the `jdk.internal.misc` package itself, so not even the `--add-opens` option
-is required. The target JVM will log a "Java agent has been loaded dynamically" warning — start it
+is required. The target JVM will log a "Java agent has been loaded dynamically" warning; start it
 with `-XX:+EnableDynamicAgentLoading` to acknowledge and silence it (a future JDK release is
 expected to require the flag for dynamic loading). Note that the agent can only be loaded this way
 into JVMs on the local machine, and that enabling collection tracking in an already-running
-process retransforms hot core classes — see the note on deoptimization in the
-[collection resize tracking](#collection-resize-tracking) section.
+process retransforms hot core classes (see the note on deoptimization in the
+[collection resize tracking](#collection-resize-tracking) section).
 
 ## Collection resize tracking
 In addition to the declarative JFR probes, the agent has a built-in capability aimed at two things:
 
-* **Right-sizing**: finding good starting sizes (initial capacities) for your collections so you can
+* Right-sizing: finding good starting sizes (initial capacities) for your collections so you can
 pre-size them and avoid a lot of resizing of the array backing the collection (and the array copying
-and rehashing that each resize incurs); and 
-* **leak hunting**: spotting slowly leaking collections that keep growing without bound. 
+and rehashing that each resize incurs); and
+* leak hunting: spotting slowly leaking collections that keep growing without bound.
 
 It emits a `jdk.jmc.CollectionResize` event (category *JMC Agent / Collections*) whenever a collection's backing array is resized: a collection that resizes repeatedly
 is a candidate for a larger initial capacity, while one that keeps growing across the run is a likely
@@ -137,17 +137,17 @@ The easiest way to see the capability in action is the
 [collection leak demo](#the-collection-leak-demo). The event is enabled by default, so any recording
 will capture it without further JFR configuration.
 
-Collection tracking is best enabled at agent **startup** (`premain`). It instruments hot core JDK
-classes, so the one-time weave is cheap at startup, but enabling it at runtime — via dynamic attach
-(`agentmain`) or by pushing a `collectiontracking` element over JMX (see below) — retransforms
-already-JIT-compiled core classes and therefore risks a significant **deoptimization storm**. That is
-allowed (the operator opts into the cost), but generally prefer startup.
+Collection tracking is best enabled at agent startup (`premain`). It instruments hot core JDK
+classes, so the one-time weave is cheap at startup, but enabling it at runtime, via dynamic attach
+(`agentmain`) or by pushing a `collectiontracking` element over JMX (see below), retransforms
+already-JIT-compiled core classes and can cause a lot of deoptimization. It works, but startup is
+the better choice.
 
-Unlike the JFR probes — which are declarative, so probes omitted from a config push are reverted —
-collection tracking is **sticky**: a push that omits the `collectiontracking` element leaves the
+Unlike the JFR probes, which are declarative so that probes omitted from a config push are
+reverted, collection tracking is sticky: a push that omits the `collectiontracking` element leaves the
 capability unchanged. This keeps it compatible with clients that predate the capability (or that
-drop unknown config elements): they cannot accidentally unweave it, and with it trigger deopt
-storms, by pushing an unrelated probe change. The full contract:
+drop unknown config elements): they cannot accidentally unweave it (and cause another round of
+deoptimization) by pushing an unrelated probe change. In summary:
 
 | Push contains | Effect |
 |---|---|
@@ -159,12 +159,13 @@ storms, by pushing an unrelated probe change. The full contract:
 
 Because an omitted element no longer describes the tracking state, the configuration read back from
 the agent (`retrieveEventProbes`) always renders the effective state explicitly, as
-`<collectiontracking enabled="..." minsize="..."/>` — so clients see the truth, and reading back,
-editing and re-pushing a configuration is stable and does not retransform the collection classes.
+`<collectiontracking enabled="..." minsize="..."/>`. The read-back therefore reflects the actual
+state, and reading back, editing and re-pushing a configuration does not retransform the
+collection classes.
 
-When disabling at runtime, **prefer turning the data off by disabling the
-`jdk.jmc.CollectionResize` event in your recording** over `enabled="false"` — unweaving retransforms
-the same hot core classes and causes a second deopt storm, whereas toggling the event is free. The
+When disabling at runtime, it is usually better to disable the `jdk.jmc.CollectionResize` event in
+the recording than to push `enabled="false"`. Unweaving retransforms the same hot core classes
+again, whereas toggling the event is free. The
 instrumentation is otherwise harmless when the event is disabled (a quick threshold check per
 resize).
 

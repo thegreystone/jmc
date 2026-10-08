@@ -254,7 +254,7 @@ Or, if on Windows:
 mvn p2:site --file releng\third-party\pom.xml && mvn jetty:run --file releng\third-party\pom.xml
 ```
 
-Alternatively, use the build script to do the same thing — `./build.sh --startP2` on Mac / Linux, or `build.bat --startP2` on Windows.
+Alternatively, use the build script to do the same thing: `./build.sh --startP2` on Mac / Linux, or `build.bat --startP2` on Windows.
 
 Then in another terminal (in the project root):
 
